@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+# % bin/detect <build-dir>
+
+set -e
+
+BUILD_DIR=$1
+
+rfd_file=".remote-files"
+
+if [ -f $BUILD_DIR/$rfd_file ]; then
+  echo "Remote File Distribution (${rfd_file})" && exit 0
+else
+  echo "no" && exit 1
+fi

@@ -1,0 +1,108 @@
+#!/usr/bin/env sh
+# % bin/compile <build-dir> <cache-dir> <env-dir>
+
+set -e
+
+BIN_DIR=$(cd $(dirname $0); pwd)
+ROOT_DIR=$(dirname $BIN_DIR)
+BUILD_DIR=$1
+CACHE_DIR=$2
+ENV_DIR=$3
+
+indent() {
+  sed -u 's/^/       /'
+}
+
+cat_env() {
+  cat $ENV_DIR/$1 2>/dev/null
+}
+
+# rfd: remote file distribution
+rfd_file=".remote-files"
+rfd_base_dir=".heroku/remote-file-distribution"
+
+s3_fetch_or_restore_from_cache() {
+  utc_now=$(date -u '+%a, %e %b %Y %H:%M:%S %Z')
+  s3_url="${1}"
+  path="$(echo "${s3_url}" | sed -e "s/s3:\/\///g")"
+  url="https://s3.amazonaws.com/${path}"
+  dst="${2}"
+
+  build_file="${BUILD_DIR}/${rfd_base_dir}/${path}"
+  build_base_dir=$(dirname $build_file)
+  mkdir -p $build_base_dir
+
+  # check cached file
+  if [ -f ${CACHE_DIR}/${rfd_base_dir}/${path} ]; then
+    echo "Remote file is found in cache as ${path}" | indent
+
+    echo "-----> Copying distributed file from cache"
+    cp $CACHE_DIR/$rfd_base_dir/$path $build_file
+  else
+    echo "Remote file is not found in cache" | indent
+
+    echo "-----> Fetching a remote file from ${url}"
+    signature="GET\n\n\n${utc_now}\n/${path}"
+    ercrypted_signature=$(echo -n "${signature}" | \
+      openssl sha1 -binary -hmac "${S3_ACCESS_KEY_ID}" | openssl base64)
+    authorization="AWS ${S3_ACCESS_KEY_ID}:${encrypted_signature}"
+
+    echo "Saving a file into ${build_base_dir}" | indent
+    res=$(curl --silent --fail --location --max-time 45 \
+      --write-out %{http_code} --fail --output "${build_file}" \
+      --header Date:"${utc_now}" \
+      --header Authorization:"${authorization}" \
+      "${url}")
+    echo "Status: ${res}" | indent
+  fi
+
+  echo "-----> Distributing a file to ${dst}"
+  mkdir -p $(dirname $dst)
+  cp $build_file $dst
+}
+
+cd $BUILD_DIR
+mkdir -p $BUILD_DIR/$rfd_base_dir
+
+while read line; do
+  case "${line}" in
+    s3://*)
+      # env
+      RFD_S3_ACCESS_KEY_ID=$(cat_env "RFD_S3_ACCESS_KEY_ID")
+      RFD_S3_ACCESS_KEY_SECRET=$(cat_env "RFD_S3_ACCESS_KEY_SECRET")
+
+      if [ -z "${RFD_S3_ACCESS_KEY_ID}" ]; then
+        echo "RFD_S3_ACCESS_KEY_ID is not found" | indent
+        exit 1
+      fi
+
+      if [ -z "${RFD_S3_ACCESS_KEY_SECRET}" ]; then
+        echo "RFD_S3_ACCESS_KEY_SECRET is not found" | indent
+        exit 1
+      fi
+
+      # e.g.
+      # s3://foo/bar/baz.txt qux/quux.txt
+      # s3://foo.txt bar/baz/qux.txt
+      dst="${line##[A-z0-9\.\-:\/]* }"
+      url="${line%?$dst}"
+      s3_fetch_or_restore_from_cache "${url}" "${dst}"
+    ;;
+    *)
+      echo "Invalid entry ${line}" | indent
+    ;;
+  esac
+done < $rfd_file
+
+# https://devcenter.heroku.com/articles/buildpack-api#caching
+# > Heroku users can use the heroku-repo plugin to clear the build cache
+# > created by the buildpack they use for their app
+echo "-----> Creating cache"
+rm -fr $CACHE_DIR/$rfd_base_dir
+mkdir -p $CACHE_DIR/$rfd_base_dir
+
+cp -R $BUILD_DIR/$rfd_base_dir/* $CACHE_DIR/$rfd_base_dir/
+
+cp $BUILD_DIR/$rfd_file $CACHE_DIR/ &> /dev/null || true
+
+exit 0
