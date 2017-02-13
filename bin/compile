@@ -9,6 +9,10 @@ BUILD_DIR=$1
 CACHE_DIR=$2
 ENV_DIR=$3
 
+# rfd: remote file distribution
+rfd_file=".remote-files"
+rfd_base_dir=".heroku/remote-file-distribution"
+
 indent() {
   sed -u 's/^/       /'
 }
@@ -17,15 +21,35 @@ cat_env() {
   cat $ENV_DIR/$1 2>/dev/null
 }
 
-# rfd: remote file distribution
-rfd_file=".remote-files"
-rfd_base_dir=".heroku/remote-file-distribution"
+hmac_sha256_asckey() {
+  var=$(echo -en $2 | \
+    openssl sha256 -hmac $1 -binary | xxd -p -c256)
+  echo $var
+}
+
+hmac_sha256() {
+  var=$(echo -en $2 | \
+    openssl dgst -sha256 -mac HMAC -macopt hexkey:$1 -binary | xxd -p -c256)
+  echo $var
+}
+
+s3_host() {
+  case "$1" in
+    us-east-1)
+      echo "s3.amazonaws.com"
+      ;;
+    *)
+      echo "s3-${1}.amazonaws.com"
+      ;;
+  esac
+}
 
 s3_fetch_or_restore_from_cache() {
-  utc_now=$(date -u '+%a, %e %b %Y %H:%M:%S %Z')
   s3_url="${1}"
+  s3_host=$(s3_host $RFD_S3_REGION)
+
   path="$(echo "${s3_url}" | sed -e "s/s3:\/\///g")"
-  url="https://s3.amazonaws.com/${path}"
+  url="https://${s3_host}/${path}"
   dst="${2}"
 
   build_file="${BUILD_DIR}/${rfd_base_dir}/${path}"
@@ -33,7 +57,7 @@ s3_fetch_or_restore_from_cache() {
   mkdir -p $build_base_dir
 
   # check cached file
-  if [ -f ${CACHE_DIR}/${rfd_base_dir}/${path} ]; then
+  if [ -f $CACHE_DIR/$rfd_base_dir/$path ]; then
     echo "Remote file is found in cache as ${path}" | indent
 
     echo "-----> Copying distributed file from cache"
@@ -41,17 +65,61 @@ s3_fetch_or_restore_from_cache() {
   else
     echo "Remote file is not found in cache" | indent
 
+    storage_service="s3"
+    auth_type="aws4_request"
+    date_value="$(TZ="UTC" date +'%Y%m%d')"
+    # empty
+    content_hash=""\
+"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+    x_amz_algorithm="AWS4-HMAC-SHA256"
+    x_amz_date="$(TZ="UTC" date +'%Y%m%dT%H%M%SZ')"
+    x_amz_credential="${RFD_S3_ACCESS_KEY_ID}/${date_value}/"\
+"${RFD_S3_REGION}/${storage_service}/${auth_type}"
+    signed_headers="host;x-amz-algorithm;x-amz-content-sha256;"\
+"x-amz-credential;x-amz-date"
+
+    canonical_req="GET\n/${path}\n\n"\
+"host:${s3_host}\n"\
+"x-amz-algorithm:${x_amz_algorithm}\n"\
+"x-amz-content-sha256:${content_hash}\n"\
+"x-amz-credential:${x_amz_credential}\n"\
+"x-amz-date:${x_amz_date}\n\n"\
+"${signed_headers}\n"\
+"${content_hash}"
+    canonical_hash=$(echo -en "${canonical_req}" | \
+      openssl sha256 -binary | xxd -p -c256)
+
+    str_to_sign="${x_amz_algorithm}\n"\
+"${x_amz_date}\n"\
+"${date_value}/${RFD_S3_REGION}/${storage_service}/${auth_type}\n"\
+"${canonical_hash}"
+
+    sign_key=$(hmac_sha256 $(hmac_sha256 $(hmac_sha256 $( \
+      hmac_sha256_asckey "AWS4""${RFD_S3_ACCESS_KEY_SECRET}" $date_value \
+    ) $RFD_S3_REGION) $storage_service) $auth_type)
+
+    signature=$(echo -en $str_to_sign | \
+      openssl dgst -sha256 -mac HMAC -macopt hexkey:"${sign_key}" -binary | \
+      xxd -p -c256)
+
+    authorization="${x_amz_algorithm} "\
+"Credential=${x_amz_credential}, "\
+"SignedHeaders=${signed_headers}, "\
+"Signature=${signature}"
+
     echo "-----> Fetching a remote file from ${url}"
-    signature="GET\n\n\n${utc_now}\n/${path}"
-    ercrypted_signature=$(echo -n "${signature}" | \
-      openssl sha1 -binary -hmac "${S3_ACCESS_KEY_ID}" | openssl base64)
-    authorization="AWS ${S3_ACCESS_KEY_ID}:${encrypted_signature}"
 
     echo "Saving a file into ${build_base_dir}" | indent
+
     res=$(curl --silent --fail --location --max-time 45 \
-      --write-out %{http_code} --fail --output "${build_file}" \
-      --header Date:"${utc_now}" \
-      --header Authorization:"${authorization}" \
+      --write-out %{http_code} --output "${build_file}" \
+      --header "Host: ${s3_host}" \
+      --header "Authorization: ${authorization}" \
+      --header "x-amz-algorithm: ${x_amz_algorithm}" \
+      --header "x-amz-content-sha256: ${content_hash}" \
+      --header "x-amz-credential: ${x_amz_credential}" \
+      --header "x-amz-date: ${x_amz_date}" \
       "${url}")
     echo "Status: ${res}" | indent
   fi
@@ -68,8 +136,14 @@ while read line; do
   case "${line}" in
     s3://*)
       # env
+      RFD_S3_REGION=$(cat_env "RFD_S3_REGION")
       RFD_S3_ACCESS_KEY_ID=$(cat_env "RFD_S3_ACCESS_KEY_ID")
       RFD_S3_ACCESS_KEY_SECRET=$(cat_env "RFD_S3_ACCESS_KEY_SECRET")
+
+      if [ -z "${RFD_S3_REGION}" ]; then
+        echo "RFD_S3_REGION is not found" | indent
+        exit 1
+      fi
 
       if [ -z "${RFD_S3_ACCESS_KEY_ID}" ]; then
         echo "RFD_S3_ACCESS_KEY_ID is not found" | indent

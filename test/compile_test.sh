@@ -8,7 +8,8 @@ indent() {
 }
 
 test_cache_detection() {
-  echo "id" > ${ENV_DIR}/RFD_S3_ACCESS_KEY_ID
+  echo "region" > ${ENV_DIR}/RFD_S3_REGION
+  echo "id"     > ${ENV_DIR}/RFD_S3_ACCESS_KEY_ID
   echo "secret" > ${ENV_DIR}/RFD_S3_ACCESS_KEY_SECRET
 
   echo "s3://foo/bar.txt static/baz.txt" > $BUILD_DIR/.remote-files

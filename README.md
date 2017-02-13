@@ -4,7 +4,7 @@ This buildpack distributes files from remote storage.
 
 Currently following storage types are available:
 
-* `s3://`, Amazon Simple Storage Service (S3)
+* `s3://`, Amazon Simple Storage Service (S3, using AWS Signature Version 4)
 
 
 ## Setup
@@ -13,8 +13,9 @@ Currently following storage types are available:
 
 ```zsh
 : for s3://, rfd: remote file distribution
-RFD_S3_ACCESS_KEY_ID=""
-RFD_S3_ACCESS_KEY_SECRET=""
+RFD_S3_REGION="us-east-1"
+RFD_S3_ACCESS_KEY_ID="..."
+RFD_S3_ACCESS_KEY_SECRET="..."
 ```
 
 
@@ -87,10 +88,23 @@ ALL OK
 
 ## Links
 
+### Buildpack
+
 * [Buildpack API | Heroku Dev Center](
-    https://devcenter.heroku.com/articles/buildpack-api)
+   https://devcenter.heroku.com/articles/buildpack-api)
 * [heroku/heroku-buildpack-testrunner: Unit testing framework for
    Heroku buildpacks.](https://github.com/heroku/heroku-buildpack-testrunner).
+
+### S3
+
+* [GET Object - Amazon Simple Storage Service](
+    http://docs.aws.amazon.com/de_de/AmazonS3/latest/API/RESTObjectGET.html)
+* [Authenticating Requests: Using the Authorization Header
+   (AWS Signature Version 4)](http://docs.aws.amazon.com/de_de/AmazonS3/
+   latest/API/sigv4-auth-using-authorization-header.html)
+
+### See also
+
 * [Yasuhiro Asaka / heroku-buildpack-make · GitLab:](
     https://gitlab.com/grauwoelfchen/heroku-buildpack-make)
 * [Yasuhiro Asaka / heroku-buildpack-gettext · GitLab:](
