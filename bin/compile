@@ -114,7 +114,7 @@ s3_fetch_or_restore_from_cache() {
 
     echo "Saving a file into ${build_base_dir}" | indent
 
-    res=$(curl --silent --fail --location --max-time 45 \
+    res=$(curl --verbose --location --max-time 45 \
       --write-out %{http_code} --output "${build_file}" \
       --header "Host: ${s3_host}" \
       --header "Authorization: ${authorization}" \
