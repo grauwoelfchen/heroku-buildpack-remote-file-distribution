@@ -29,9 +29,9 @@ The files `.remote-files` and `.buildpacks` should be commited into VCS.
 
 ```zsh
 % cat .remote-files
-s3://xxx <app>/static/foo.txt
-s3://zzz <app>/static/img/foo.html
-s3://yyy <app>/templates/foo.html
+s3://<bucket>/foo.txt <app>/static/foo.txt
+s3://<bucket>/<folder>/foo.png <app>/static/img/foo.png
+s3://<bucket>/<folder>/foo.html <app>/templates/foo.html
 ```
 
 ```zsh
@@ -59,11 +59,11 @@ This uses [heroku-buildpack-testrunner](
 
 ```zsh
 % sh ./test/suite.sh
-
 BUILDPACK: /app/buildpack
   TEST SUITE: compile_test.sh
+  test_cache_detection
 
-  Ran 0 tests.
+  Ran 1 test.
 
   OK
   0 SECONDS
