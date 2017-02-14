@@ -3,10 +3,6 @@
 
 . ${BUILDPACK_TEST_RUNNER_HOME}/lib/test_utils.sh
 
-indent() {
-  sed -u 's/^/       /'
-}
-
 test_cache_detection() {
   echo "region" > ${ENV_DIR}/RFD_S3_REGION
   echo "id"     > ${ENV_DIR}/RFD_S3_ACCESS_KEY_ID
